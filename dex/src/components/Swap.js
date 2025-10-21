@@ -7,8 +7,10 @@ import {
 } from "@ant-design/icons";
 import tokenList from "../tokenList.json";
 import axios from "axios";
+import { useSendTransaction, useWaitForTransaction } from "wagmi";
 
-function Swap() {
+function Swap(props) {
+  const { address, isConnected } = props;
   const [slippage, setSlippage] = useState(2.5);
   const [tokenOneAmount, setTokenOneAmount] = useState(null);
   const [tokenTwoAmount, setTokenTwoAmount] = useState(null);
@@ -17,6 +19,19 @@ function Swap() {
   const [isOpen, setIsOpen] = useState(false);
   const [changeToken, setChangeToken] = useState(1);
   const [prices, setPrices] = useState(null);
+  const [txDetails, setTxDetails] = useState({
+    to: null,
+    data: null,
+    value: null,
+  });
+  const { data, sendTransaction } = useSendTransaction({
+    request: {
+      from: address,
+      to: String(txDetails.to),
+      data: String(txDetails.data),
+      value: String(txDetails.value),
+    },
+  });
 
   const handlesSlippageChange = (e) => {
     setSlippage(e.target.value);
@@ -63,6 +78,12 @@ function Swap() {
     console.log(res.data);
     setPrices(res.data);
   };
+
+  const fetchDexSwap = async () => {
+    //TODO 尝试使用ChainLink
+    const allowance = await axios.get(``);
+  };
+
   const settings = (
     <>
       <div>Slippage Tolerance</div>
@@ -79,6 +100,12 @@ function Swap() {
   useEffect(() => {
     fetchPrices(tokenList[0].address, tokenList[1].address);
   }, []);
+
+  useEffect(() => {
+    if (txDetails.to && isConnected) {
+      sendTransaction();
+    }
+  }, [txDetails]);
 
   return (
     <>
@@ -151,7 +178,10 @@ function Swap() {
             <DownOutlined />
           </div>
         </div>
-        <button className="swapButton" disabled={!tokenOneAmount}>
+        <button
+          className="swapButton"
+          disabled={!tokenOneAmount || isConnected}
+        >
           Swap
         </button>
       </div>
