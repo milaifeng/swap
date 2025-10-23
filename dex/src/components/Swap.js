@@ -1,13 +1,17 @@
-import React, { useEffect, useState } from "react";
-import { Input, Popover, Radio, Modal, message, Divider } from "antd";
+import { useEffect, useState } from "react";
+import { Input, Popover, Radio, Modal } from "antd";
 import {
   ArrowDownOutlined,
   DownOutlined,
   SettingOutlined,
 } from "@ant-design/icons";
-import tokenList from "../tokenList.json";
+import { ChainId, Token, WETH9, CurrencyAmount } from "@uniswap/sdk-core";
+import { Pair, Route } from "@uniswap/v2-sdk";
+import tokenList from "../sepoliaTokenList.json";
 import axios from "axios";
-import { useSendTransaction, useWaitForTransaction } from "wagmi";
+import uniswapV2poolABI from "../ABI/uniswapV2poolABI.json";
+import { useSendTransaction } from "wagmi";
+import { ethers } from "ethers";
 
 function Swap(props) {
   const { address, isConnected } = props;
@@ -24,6 +28,33 @@ function Swap(props) {
     data: null,
     value: null,
   });
+
+  async function createPair(oneToken, twoToken) {
+    const pairAddress = Pair.getAddress(oneToken, twoToken);
+    const SEPOLIA_RPC =
+      "https://eth-sepolia.g.alchemy.com/v2/4_Fufereik6m3GWzM7L9W8alWa32O_0C";
+    // const provider = new ethers.JsonRpcProvider(SEPOLIA_RPC);
+    const provider = new ethers.providers.JsonRpcProvider(SEPOLIA_RPC);
+    const pairContract = new ethers.Contract(
+      pairAddress,
+      uniswapV2poolABI.abi,
+      provider
+    );
+    const reserves = await pairContract["getReserves"]();
+    const [reserve0, reserve1] = reserves;
+
+    const tokens = [oneToken, twoToken];
+    const [token0, token1] = tokens[0].sortsBefore(tokens[1])
+      ? tokens
+      : [tokens[1], tokens[0]];
+
+    const pair = new Pair(
+      CurrencyAmount.fromRawAmount(token0, reserve0),
+      CurrencyAmount.fromRawAmount(token1, reserve1)
+    );
+    return pair;
+  }
+
   const { data, sendTransaction } = useSendTransaction({
     request: {
       from: address,
@@ -39,7 +70,7 @@ function Swap(props) {
   const changeAmount = (e) => {
     setTokenOneAmount(e.target.value);
     if (e.target.value && prices) {
-      setTokenTwoAmount((e.target.value * prices.ratio).toFixed(2));
+      setTokenTwoAmount((e.target.value * prices.ratio).toFixed(6));
     } else {
       setTokenTwoAmount(null);
     }
@@ -52,7 +83,7 @@ function Swap(props) {
     const two = tokenTwo;
     setTokenOne(two);
     setTokenTwo(one);
-    fetchPrices(two.address, one.address);
+    fetchPrices(two, one);
   };
   const openModa = (asset) => {
     setChangeToken(asset);
@@ -64,19 +95,26 @@ function Swap(props) {
     setTokenTwoAmount(null);
     if (changeToken === 1) {
       setTokenOne(tokenList[index]);
-      fetchPrices(tokenList[index].address, tokenTwo.address);
+      fetchPrices(tokenList[index], tokenTwo);
     } else {
       setTokenTwo(tokenList[index]);
-      fetchPrices(tokenOne.address, tokenList[index].address);
+      fetchPrices(tokenOne, tokenList[index]);
     }
     setIsOpen(false);
   };
   const fetchPrices = async (one, two) => {
-    const res = await axios.get(`http://localhost:8000/tokenPrice`, {
-      params: { addressOne: one, addressTwo: two },
+    const oneToken = new Token(ChainId.SEPOLIA, one.address, one.decimals);
+    const twoToken = new Token(ChainId.SEPOLIA, two.address, two.decimals);
+
+    const pair = await createPair(oneToken, twoToken);
+    const route = new Route([pair], oneToken, twoToken);
+    const oneTokenPrices = route.midPrice.toSignificant(6);
+    const twoTokenPrices = route.midPrice.invert().toSignificant(6);
+    setPrices({
+      tokenOne: oneTokenPrices,
+      tokenTwo: twoTokenPrices,
+      ratio: oneTokenPrices,
     });
-    console.log(res.data);
-    setPrices(res.data);
   };
 
   const fetchDexSwap = async () => {
@@ -98,7 +136,7 @@ function Swap(props) {
   );
 
   useEffect(() => {
-    fetchPrices(tokenList[0].address, tokenList[1].address);
+    fetchPrices(tokenList[0], tokenList[1]);
   }, []);
 
   useEffect(() => {
