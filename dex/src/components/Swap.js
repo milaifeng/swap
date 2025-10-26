@@ -5,121 +5,126 @@ import {
   DownOutlined,
   SettingOutlined,
 } from "@ant-design/icons";
-import { ChainId, Token, WETH9, CurrencyAmount } from "@uniswap/sdk-core";
-import { Pair, Route } from "@uniswap/v2-sdk";
-import tokenList from "../sepoliaTokenList.json";
+import tokenList from "../tokenList.json";
 import axios from "axios";
-import uniswapV2poolABI from "../ABI/uniswapV2poolABI.json";
-import { useSendTransaction } from "wagmi";
 import { ethers } from "ethers";
-
+import { UNISWAP_ROUTER } from "./constants";
 function Swap(props) {
   const { address, isConnected } = props;
-  const [slippage, setSlippage] = useState(2.5);
+  const [loading, setLoading] = useState(false);
+  const [slippage, setSlippage] = useState(2.5); //滑点
   const [tokenOneAmount, setTokenOneAmount] = useState(null);
   const [tokenTwoAmount, setTokenTwoAmount] = useState(null);
   const [tokenOne, setTokenOne] = useState(tokenList[0]);
   const [tokenTwo, setTokenTwo] = useState(tokenList[1]);
   const [isOpen, setIsOpen] = useState(false);
   const [changeToken, setChangeToken] = useState(1);
-  const [prices, setPrices] = useState(null);
-  const [txDetails, setTxDetails] = useState({
-    to: null,
-    data: null,
-    value: null,
-  });
-
-  async function createPair(oneToken, twoToken) {
-    const pairAddress = Pair.getAddress(oneToken, twoToken);
-    const SEPOLIA_RPC =
-      "https://eth-sepolia.g.alchemy.com/v2/4_Fufereik6m3GWzM7L9W8alWa32O_0C";
-    // const provider = new ethers.JsonRpcProvider(SEPOLIA_RPC);
-    const provider = new ethers.providers.JsonRpcProvider(SEPOLIA_RPC);
-    const pairContract = new ethers.Contract(
-      pairAddress,
-      uniswapV2poolABI.abi,
-      provider
-    );
-    const reserves = await pairContract["getReserves"]();
-    const [reserve0, reserve1] = reserves;
-
-    const tokens = [oneToken, twoToken];
-    const [token0, token1] = tokens[0].sortsBefore(tokens[1])
-      ? tokens
-      : [tokens[1], tokens[0]];
-
-    const pair = new Pair(
-      CurrencyAmount.fromRawAmount(token0, reserve0),
-      CurrencyAmount.fromRawAmount(token1, reserve1)
-    );
-    return pair;
-  }
-
-  const { data, sendTransaction } = useSendTransaction({
-    request: {
-      from: address,
-      to: String(txDetails.to),
-      data: String(txDetails.data),
-      value: String(txDetails.value),
-    },
-  });
-
+  const [methodParameters, setMethodParameters] = useState(null);
+  const provider = new ethers.providers.Web3Provider(window.ethereum);
+  const signer = provider.getSigner();
   const handlesSlippageChange = (e) => {
     setSlippage(e.target.value);
   };
-  const changeAmount = (e) => {
-    setTokenOneAmount(e.target.value);
-    if (e.target.value && prices) {
-      setTokenTwoAmount((e.target.value * prices.ratio).toFixed(6));
-    } else {
-      setTokenTwoAmount(null);
-    }
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      if (tokenOneAmount) {
+        console.log("请求报价");
+        setLoading(true);
+        const data = await fetchPrices(tokenOne, tokenTwo, tokenOneAmount);
+        setMethodParameters(data);
+        setTokenTwoAmount(data.quote);
+        setLoading(false);
+      }
+    }, 1000);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [tokenOneAmount, tokenOne, tokenTwo]);
+  const changeAmount = async (e) => {
+    setTokenOneAmount(e.target.value.trim());
   };
   const switchTokens = () => {
-    setPrices(null);
+    setMethodParameters(null);
     setTokenOneAmount(null);
     setTokenTwoAmount(null);
     const one = tokenOne;
     const two = tokenTwo;
     setTokenOne(two);
     setTokenTwo(one);
-    fetchPrices(two, one);
   };
   const openModa = (asset) => {
     setChangeToken(asset);
     setIsOpen(true);
   };
   const modifyToken = (index) => {
-    setPrices(null);
+    setMethodParameters(null);
     setTokenOneAmount(null);
     setTokenTwoAmount(null);
     if (changeToken === 1) {
       setTokenOne(tokenList[index]);
-      fetchPrices(tokenList[index], tokenTwo);
     } else {
       setTokenTwo(tokenList[index]);
-      fetchPrices(tokenOne, tokenList[index]);
     }
     setIsOpen(false);
   };
-  const fetchPrices = async (one, two) => {
-    const oneToken = new Token(ChainId.SEPOLIA, one.address, one.decimals);
-    const twoToken = new Token(ChainId.SEPOLIA, two.address, two.decimals);
-
-    const pair = await createPair(oneToken, twoToken);
-    const route = new Route([pair], oneToken, twoToken);
-    const oneTokenPrices = route.midPrice.toSignificant(6);
-    const twoTokenPrices = route.midPrice.invert().toSignificant(6);
-    setPrices({
-      tokenOne: oneTokenPrices,
-      tokenTwo: twoTokenPrices,
-      ratio: oneTokenPrices,
+  const fetchPrices = async (one, two, amountIn) => {
+    const res = await axios("http://localhost:8000/tokenPrice", {
+      params: {
+        tokenInAddress: one.address,
+        tokenOutAddress: two.address,
+        amountIn: amountIn,
+        tokenInDecimals: one.decimals,
+        tokenOutDecimals: two.decimals,
+      },
     });
+    return res.data;
   };
 
+  const approveToken = async (tokenAddress, amount, spender) => {
+    const tokenContract = new ethers.Contract(
+      tokenAddress,
+      [
+        "function approve(address,uint256) external returns (bool)",
+        "function allowance(address,address) external view returns (uint256)",
+      ],
+      signer
+    );
+    console.log(address, amount, spender);
+    const currentAllowance = await tokenContract.allowance(address, spender);
+    if (currentAllowance.gt(0)) {
+      console.log("⚠️ 当前已存在授权额度，先清零...");
+      const tx0 = await tokenContract.approve(spender, 0);
+      await tx0.wait();
+    }
+    console.log("✅ 执行授权...");
+    const tx1 = await tokenContract.approve(spender, amount);
+    await tx1.wait();
+    console.log("✅ 授权成功");
+  };
+  const executeSwap = async () => {
+    const feeData = await provider.getFeeData();
+    const tx = {
+      to: UNISWAP_ROUTER,
+      data: methodParameters.calldata,
+      value: methodParameters.value,
+      from: address,
+      maxFeePerGas: feeData.maxFeePerGas,
+      maxPriorityFeePerGas: feeData.maxPriorityFeePerGas,
+    };
+    const sentTx = await signer.sendTransaction(tx);
+    console.log("交易发送成功:", sentTx.hash);
+    const receipt = await sentTx.wait();
+    console.log("✅ 交易已确认:", receipt.transactionHash);
+  };
   const fetchDexSwap = async () => {
-    //TODO 尝试使用ChainLink
-    const allowance = await axios.get(``);
+    setLoading(true);
+    approveToken(
+      tokenOne.address,
+      ethers.BigNumber.from(tokenOneAmount.toString()),
+      UNISWAP_ROUTER
+    );
+    executeSwap();
+    setLoading(false);
   };
 
   const settings = (
@@ -134,16 +139,6 @@ function Swap(props) {
       </div>
     </>
   );
-
-  useEffect(() => {
-    fetchPrices(tokenList[0], tokenList[1]);
-  }, []);
-
-  useEffect(() => {
-    if (txDetails.to && isConnected) {
-      sendTransaction();
-    }
-  }, [txDetails]);
 
   return (
     <>
@@ -197,7 +192,7 @@ function Swap(props) {
           </div>
           <div
             className="assetOne"
-            onClick={() => {
+            onClick={(e) => {
               openModa(1);
             }}
           >
@@ -207,7 +202,7 @@ function Swap(props) {
           </div>
           <div
             className="assetTwo"
-            onClick={() => {
+            onClick={(e) => {
               openModa(2);
             }}
           >
@@ -218,9 +213,10 @@ function Swap(props) {
         </div>
         <button
           className="swapButton"
-          disabled={!tokenOneAmount || isConnected}
+          disabled={!tokenTwoAmount || !isConnected}
+          onClick={fetchDexSwap}
         >
-          Swap
+          {loading ? "Loading....." : "Swap"}
         </button>
       </div>
     </>

@@ -27,5 +27,12 @@
     "name": "Uniswap",
     "address": "0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984",
     "decimals": 18
+  },
+  {
+    "ticker": "ETH",
+    "img": "/eth.svg",
+    "name": "Ether",
+    "address": "0x0000000000000000000000000000000000000000",
+    "decimals": 18
   }
 ]
