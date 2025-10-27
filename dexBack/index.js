@@ -77,6 +77,14 @@ app.get("/tokenPrice", async (req, res) => {
       path: route.trade.swaps.map((s) =>
         s.route.tokenPath.map((t) => t.symbol || t.address).join(" → ")
       ),
+      pools: route.trade.swaps.map((s) =>
+        s.route.pools.map((p) => ({
+          token0: p.token0.address,
+          token1: p.token1.address,
+          fee: p.fee, // 👈 关键字段
+          liquidity: p.liquidity?.toString(),
+        }))
+      ),
       methodParameters: route.methodParameters,
     });
   } catch (err) {
