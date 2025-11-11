@@ -13,7 +13,7 @@ import { UNISWAP_ROUTER } from "./constants";
 function Swap(props) {
   const { address, isConnected } = props;
   const [loading, setLoading] = useState(false);
-  const [slippage, setSlippage] = useState(2.5);
+  const [slippage, setSlippage] = useState(0.5);
   const [tokenOneAmount, setTokenOneAmount] = useState(null);
   const [tokenTwoAmount, setTokenTwoAmount] = useState(null);
   const [tokenOne, setTokenOne] = useState(tokenList[0]);
@@ -27,20 +27,19 @@ function Swap(props) {
 
   const handlesSlippageChange = (e) => setSlippage(e.target.value);
 
-  // 🔹 自动报价
+  // 自动报价
   useEffect(() => {
     const timer = setTimeout(async () => {
       if (tokenOneAmount) {
-        console.log("💰 请求报价...");
         setLoading(true);
         try {
           const data = await fetchPrices(
             tokenOne,
             tokenTwo,
             tokenOneAmount,
-            address
+            address,
+            slippage
           );
-          console.log("🧮 报价返回:", data);
           setMethodParameters(data.methodParameters);
           setTokenTwoAmount(data.quote);
         } catch (err) {
@@ -53,7 +52,7 @@ function Swap(props) {
       }
     }, 1000);
     return () => clearTimeout(timer);
-  }, [tokenOneAmount, tokenOne, tokenTwo, address]);
+  }, [tokenOneAmount, tokenOne, tokenTwo, address, slippage]);
 
   const changeAmount = (e) => setTokenOneAmount(e.target.value.trim());
 
@@ -85,13 +84,7 @@ function Swap(props) {
   };
 
   // 🔹 报价
-  const fetchPrices = async (one, two, amountIn, address) => {
-    console.log("🔍 获取报价参数:", {
-      tokenIn: one.address,
-      tokenOut: two.address,
-      amountIn,
-      address,
-    });
+  const fetchPrices = async (one, two, amountIn, address, slippage) => {
     const res = await axios("http://localhost:8000/tokenPrice", {
       params: {
         tokenInAddress: one.address,
@@ -100,19 +93,15 @@ function Swap(props) {
         tokenInDecimals: one.decimals,
         tokenOutDecimals: two.decimals,
         recipient: address || null,
+        slippage: slippage,
       },
     });
     return res.data;
   };
 
-  // 🔹 授权函数（带详细调试日志）
+  // 授权函数
   const approveToken = async (tokenAddress, amount, spender) => {
     try {
-      console.log("========== 🧾 开始授权调试 ==========");
-      console.log("🔹 Token 地址:", tokenAddress);
-      console.log("🔹 Spender (Router):", spender);
-      console.log("🔹 授权金额 (原始):", amount.toString());
-
       const tokenContract = new ethers.Contract(
         tokenAddress,
         [
@@ -121,55 +110,25 @@ function Swap(props) {
         ],
         signer
       );
-
+      // 查询授权
       const currentAllowance = await tokenContract.allowance(address, spender);
-      console.log("🔑 当前授权额度:", currentAllowance.toString());
-
+      // 主要针对USDT代币，如果有授权则授权清零，重新授权
       if (currentAllowance.gt(0)) {
-        console.log("⚠️ 存在旧授权，清零中...");
         const tx0 = await tokenContract.approve(spender, 0);
-        console.log("🕓 清零中, Tx:", tx0.hash);
         await tx0.wait();
       }
-
-      console.log("✅ 开始授权新的额度...");
       const tx1 = await tokenContract.approve(spender, amount);
-      console.log("📤 授权交易哈希:", tx1.hash);
       await tx1.wait();
-      console.log("✅ 授权成功!");
-      console.log("=====================================");
     } catch (err) {
       console.error("❌ 授权失败:", err);
     }
   };
 
-  // 🔹 交换函数（含 Not WETH9 调试）
+  // 🔹 交换函数
   const executeSwap = async () => {
     try {
-      console.log("========== ⚙️ 开始执行 Swap ==========");
       if (!methodParameters) throw new Error("methodParameters 未定义");
-
-      const network = await provider.getNetwork();
-      console.log(
-        "🌐 当前网络:",
-        network.name,
-        "(ChainId:",
-        network.chainId,
-        ")"
-      );
-      console.log("🔗 Router 地址:", UNISWAP_ROUTER);
-      console.log("📜 Calldata:", methodParameters.calldata);
-      console.log(
-        "💰 Value:",
-        methodParameters.value?.toString?.() ?? methodParameters.value
-      );
-
       const feeData = await provider.getFeeData();
-      console.log("⛽ FeeData:", feeData);
-
-      const balance = await provider.getBalance(address);
-      console.log("👛 当前 ETH 余额:", ethers.utils.formatEther(balance));
-
       const tx = {
         to: UNISWAP_ROUTER,
         data: methodParameters.calldata,
@@ -178,57 +137,41 @@ function Swap(props) {
         maxFeePerGas: feeData.maxFeePerGas,
         maxPriorityFeePerGas: feeData.maxPriorityFeePerGas,
       };
-
-      console.log("🚀 即将发送交易:", tx);
-
       const sentTx = await signer.sendTransaction(tx);
-      console.log("📤 交易已发送:", sentTx.hash);
       const receipt = await sentTx.wait();
-      console.log("✅ 交易确认成功, 区块:", receipt.blockNumber);
-      setTokenOneAmount(null);
-      setTokenTwoAmount(null);
+      console.log("交易确认成功, 区块:", receipt.blockNumber);
     } catch (err) {
-      console.error("❌ 执行 Swap 出错:", err);
-      if (err?.message?.includes("Not WETH9")) {
-        console.error(
-          "🚨 调试提示: 路径中可能没有正确的 WETH 地址或链 ID 不匹配！"
-        );
-      }
+      console.error("执行Swap出错:", err);
     }
   };
 
-  // 🔹 主入口
+  //主入口
   const fetchDexSwap = async () => {
     try {
       setLoading(true);
-      console.log("========== 🚀 开始 Swap 全流程 ==========");
-      console.log("🔹 输入 Token:", tokenOne.ticker, tokenOne.address);
-      console.log("🔹 输出 Token:", tokenTwo.ticker, tokenTwo.address);
-      console.log("🔹 数量:", tokenOneAmount);
-      console.log("🔹 当前 Router:", UNISWAP_ROUTER);
-
       await approveToken(
         tokenOne.address,
         ethers.utils.parseUnits(tokenOneAmount.toString(), tokenOne.decimals),
         UNISWAP_ROUTER
       );
-
       await executeSwap();
-      console.log("✅ Swap 全流程完成");
     } catch (err) {
-      console.error("❌ 全流程出错:", err);
+      console.error("出错了:", err);
     } finally {
+      setTokenOneAmount(null);
+      setTokenTwoAmount(null);
       setLoading(false);
     }
   };
 
-  // 🔧 设置项
+  // 设置项
   const settings = (
     <>
       <div>Slippage Tolerance</div>
       <div>
         <Radio.Group value={slippage} onChange={handlesSlippageChange}>
           <Radio.Button value={0.5}>0.5%</Radio.Button>
+          <Radio.Button value={1}>1.0%</Radio.Button>
           <Radio.Button value={2.5}>2.5%</Radio.Button>
           <Radio.Button value={5}>5.0%</Radio.Button>
         </Radio.Group>
@@ -236,7 +179,7 @@ function Swap(props) {
     </>
   );
 
-  // 🔹 UI 部分
+  // UI 部分
   return (
     <>
       <Modal

@@ -19,7 +19,7 @@ function App() {
             path="/"
             element={<Swap isConnected={isConnected} address={address} />}
           />
-          <Route path="/tokens" element={<Token />}></Route>
+          {/* <Route path="/tokens" element={<Token />}></Route> */}
         </Routes>
       </div>
     </div>

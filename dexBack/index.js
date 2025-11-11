@@ -16,12 +16,12 @@ app.use(cors());
 app.use(express.json());
 
 const port = 8000;
-const SEPOLIA = 1;
+const Ethereum = 1;
 
 const provider = new ethers.providers.JsonRpcProvider(
-  process.env.ALCHEMY_SEPOLIA_URL
+  process.env.ALCHEMY_MAIN_URL
 );
-const router = new AlphaRouter({ chainId: SEPOLIA, provider });
+const router = new AlphaRouter({ chainId: Ethereum, provider });
 let num = 1;
 app.get("/tokenPrice", async (req, res) => {
   console.log(`第${num}次开始报价~~~`);
@@ -33,6 +33,7 @@ app.get("/tokenPrice", async (req, res) => {
     tokenInDecimals,
     tokenOutDecimals,
     recipient,
+    slippage,
   } = req.query;
 
   try {
@@ -40,9 +41,13 @@ app.get("/tokenPrice", async (req, res) => {
       return res.status(400).json({ error: "Missing parameters" });
     }
 
-    const tokenIn = new Token(SEPOLIA, tokenInAddress, Number(tokenInDecimals));
+    const tokenIn = new Token(
+      Ethereum,
+      tokenInAddress,
+      Number(tokenInDecimals)
+    );
     const tokenOut = new Token(
-      SEPOLIA,
+      Ethereum,
       tokenOutAddress,
       Number(tokenOutDecimals)
     );
@@ -55,14 +60,13 @@ app.get("/tokenPrice", async (req, res) => {
       tokenIn,
       JSBI.BigInt(rawAmountIn.toString())
     );
-
     const route = await router.route(
       amountCurrency,
       tokenOut,
       TradeType.EXACT_INPUT, // EXACT_INPUT
       {
         recipient: recipient || ethers.constants.AddressZero,
-        slippageTolerance: new Percent(5, 100),
+        slippageTolerance: new Percent(slippage * 100, 10000),
         deadline: Math.floor(Date.now() / 1000) + 1800,
         type: SwapType.SWAP_ROUTER_02,
       }
@@ -81,7 +85,7 @@ app.get("/tokenPrice", async (req, res) => {
         s.route.pools.map((p) => ({
           token0: p.token0.address,
           token1: p.token1.address,
-          fee: p.fee, // 👈 关键字段
+          fee: p.fee,
           liquidity: p.liquidity?.toString(),
         }))
       ),
